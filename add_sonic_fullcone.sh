@@ -60,20 +60,22 @@ applied=0
 skipped=0
 
 # --- Kernel patches ---
-#   984: nf_nat_core fullcone (SONiC core, 3-tuple hash)
+#   984: nf_nat_core fullcone (SONiC core, 3-tuple hash, with the fixes submitted to SONiC)
 #   985: xt_MASQUERADE FULLCONE target (iptables, PRE+POST hooks)
 #   986: nft_masq fullcone expression (nftables, PRE+POST hooks)
+#   987: fixes on top of 984 that are not part of the SONiC patch
 for kv in $kernel_versions; do
     hack_dir="./target/linux/generic/hack-$kv"
     if [ -d "$hack_dir" ]; then
         cp -f "$SRC/kernel/984-add-sonic-fullcone-support.patch"  "$hack_dir/"
         cp -f "$SRC/kernel/985-add-sonic-fullcone-to-ipt.patch"   "$hack_dir/"
         cp -f "$SRC/kernel/986-add-sonic-fullcone-to-nft.patch"   "$hack_dir/"
-        echo "[kernel]   hack-$kv: applied (984+985+986)"
-        applied=$((applied + 3))
+        cp -f "$SRC/kernel/987-sonic-fullcone-fix-races-and-drops.patch" "$hack_dir/"
+        echo "[kernel]   hack-$kv: applied (984+985+986+987)"
+        applied=$((applied + 4))
     else
         echo "[kernel]   hack-$kv: directory not found, skipped"
-        skipped=$((skipped + 3))
+        skipped=$((skipped + 4))
     fi
 done
 
@@ -120,6 +122,7 @@ if [ -d "./package/network/utils/nftables" ]; then
     nft_dir="./package/network/utils/nftables/patches"
     mkdir -p "$nft_dir"
     cp -f "$SRC/patches/nftables/002-nftables-add-fullcone-expression-support.patch" "$nft_dir/"
+    cp -f "$SRC/patches/nftables/003-nftables-handle-fullcone-in-json-parser-and-optimizer.patch" "$nft_dir/"
     echo "[nftables] applied"
     applied=$((applied + 1))
 else
@@ -160,7 +163,16 @@ if [ -d "./feeds/luci/applications/luci-app-firewall" ]; then
 
     # Append zh_Hans translations directly to po file (po/ is not in build_dir, patches won't work)
     zh_po="./feeds/luci/applications/luci-app-firewall/po/zh_Hans/firewall.po"
-    if [ -f "$zh_po" ] && ! grep -q "Fullcone NAT" "$zh_po"; then
+    if [ -f "$zh_po" ]; then
+        # Replace a block an earlier run appended, its strings may be stale:
+        # the current block is marked, older ones run from the "Fullcone NAT"
+        # msgid to the "所有协议" msgstr.
+        sed '/^# BEGIN openwrt-sonic-fullcone$/,/^# END openwrt-sonic-fullcone$/d' \
+            "$zh_po" > "$zh_po.tmp" && mv "$zh_po.tmp" "$zh_po"
+        if grep -q '^msgid "Fullcone NAT"$' "$zh_po" && grep -q '^msgstr "所有协议"$' "$zh_po"; then
+            sed '/^msgid "Fullcone NAT"$/,/^msgstr "所有协议"$/d' \
+                "$zh_po" > "$zh_po.tmp" && mv "$zh_po.tmp" "$zh_po"
+        fi
         cat "$SRC/translations/zh_Hans.po" >> "$zh_po"
         echo "[luci]     zh_Hans translation appended"
     fi
